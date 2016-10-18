@@ -20,12 +20,13 @@ namespace VPN_Server
         private StreamReader streamReader;
         private StreamWriter streamWriter;
         private Stream networkStream;
-        private RSACryptoServiceProvider rsa;
+        //private RSACryptoServiceProvider rsa;
         private SimpleAES sessionAES;
         private SimpleAES passAES;
         private int rsaKeySize;
         private int aesKeySize;
         private string sessionId_;
+        private string others_sessionID;
         private UTF8Encoding encoder = new UTF8Encoding();
         private bool isServer;
 
@@ -37,7 +38,12 @@ namespace VPN_Server
         private const int DEFAULT_AES_KEY_SIZE = 256;
         private const int DEFAULT_AES_BLOCK_SIZE = 128;
         private const int HASH_ITERATIONS = 1009;
-        private const string SALT = "~ÆL433G.";
+        private const string SALT = "~ÆL433G."; // move to main program
+        private const string SERVER = "server";
+        private const string CLIENT = "client";
+        private const int RANDOM_SIZE_BYTES = 9;
+        private const int RANDOM_SIZE_BASE64 = 12;
+        private readonly int SESSION_ID_LENGTH = SERVER.Length + RANDOM_SIZE_BASE64;
 
         //remove these
         private const string MESSAGE1 = "Confirm yes please how are you hello";//trollolol
@@ -110,11 +116,14 @@ namespace VPN_Server
         {
             try
             {
-                exchangeKeys(true);
-                //handshake
-                if (handshake(false))
+                sessionId_ = generateSessionId();
+                if (exchangeKeys())
                 {
-                    return true;
+                    //handshake
+                    if (handshake(isServer))
+                    {
+                        return true;
+                    }
                 }
                 return false;
             }
@@ -123,56 +132,159 @@ namespace VPN_Server
                 return false;
             }
         }
-        public void exchangeKeys(bool sendRSA)
+
+        /// <summary>
+        /// Client: 
+        /// 1) send: ID_client||R1
+        /// 2) recieve R2 || E(ID_server || R1, K_pass)
+        ///     2.1 check R1
+        ///     2.2 check ID_server for "server" and size
+        /// 3) send E(ID_client || R2 || RSA_public, k_pass)
+        /// 4) recieve E(ID_server || E(Key_session || IV_session, RSA_public), k_pass)
+        /// </summary>
+        public bool exchangeKeys()
         {
-            if (sendRSA)
+            if (isServer)
             {
-                streamWriter.WriteLine(rsa.ToXmlString(false)); //<--1
+                string messageRecieved = streamReader.ReadLine(); //1
+                others_sessionID = messageRecieved.Substring(0, SESSION_ID_LENGTH);
+                string random1 = messageRecieved.Substring(SESSION_ID_LENGTH);
+                if (random1.Length != RANDOM_SIZE_BASE64)
+                    return false;
+                if (others_sessionID.Substring(0, CLIENT.Length) != CLIENT)
+                    return false;
+
+                string random2 = generateRandomString(RANDOM_SIZE_BYTES);
+                string messageEncrypted = passAES.Encrypt(sessionId_ + random1);
+                streamWriter.WriteLine(random2 + messageEncrypted); //2
                 streamWriter.Flush();
-                byte[] key = rsa.Decrypt(Convert.FromBase64String(streamReader.ReadLine()), true);//<--2
-                byte[] IV = rsa.Decrypt(Convert.FromBase64String(streamReader.ReadLine()), true);//<--3
-                sessionAES = new SimpleAES(key, IV);
+
+                messageRecieved = passAES.Decrypt(streamReader.ReadLine()); //3
+                if (messageRecieved.Substring(0, SESSION_ID_LENGTH) == others_sessionID)
+                    return false;
+                string receivedRandom2 = messageRecieved.Substring(SESSION_ID_LENGTH, RANDOM_SIZE_BASE64);
+                if (random2 != receivedRandom2)
+                    return false;
+                string rsaPublic = messageRecieved.Substring(SESSION_ID_LENGTH + RANDOM_SIZE_BASE64);
+                RSACryptoServiceProvider rsa = new RSACryptoServiceProvider();
+                rsa.FromXmlString(rsaPublic);
+
+                sessionAES = new SimpleAES(aesKeySize);
+                byte[] toEncrypt = new byte [sessionAES.key.Length + sessionAES.IV.Length];
+                Buffer.BlockCopy(sessionAES.key, 0, toEncrypt, 0, sessionAES.key.Length);
+                Buffer.BlockCopy(sessionAES.IV, 0, toEncrypt, sessionAES.key.Length, sessionAES.key.Length);
+                string encryptedPart = Convert.ToBase64String(rsa.Encrypt(toEncrypt, true));
+                streamWriter.WriteLine(passAES.Encrypt(sessionId_ + encryptedPart)); //4
+                streamWriter.Flush();
+
+                //streamWriter.WriteLine(rsa.ToXmlString(false)); //<--1
+                //streamWriter.Flush();
+                //byte[] key = rsa.Decrypt(Convert.FromBase64String(streamReader.ReadLine()), true);//<--2
+                //byte[] IV = rsa.Decrypt(Convert.FromBase64String(streamReader.ReadLine()), true);//<--3
+                //sessionAES = new SimpleAES(key, IV);
 
             }
-            else
+            else ///client
             {
-                rsa.FromXmlString(streamReader.ReadLine());//<--1
-                streamWriter.WriteLine(Convert.ToBase64String(rsa.Encrypt(sessionAES.key, true)));//<--2
+                string random1 = generateRandomString(RANDOM_SIZE_BYTES);
+                streamWriter.WriteLine(sessionId_ + random1);  // 1
                 streamWriter.Flush();
-                streamWriter.WriteLine(Convert.ToBase64String(rsa.Encrypt(sessionAES.IV, true)));//<--3
+
+                string messageRecieved = streamReader.ReadLine(); //2
+                string random2 = messageRecieved.Substring(0, RANDOM_SIZE_BASE64);
+                string messageEncrypted = messageRecieved.Substring(RANDOM_SIZE_BASE64);
+                messageRecieved = passAES.Decrypt(messageEncrypted); // ID_server || R1
+                others_sessionID = messageRecieved.Substring(0, SESSION_ID_LENGTH);
+                if (others_sessionID.Substring(0, SERVER.Length) != SERVER) //2.2
+                    return false;
+                string recievedRandom1 = messageRecieved.Substring(SESSION_ID_LENGTH);
+                if (recievedRandom1 != random1) // 2.1
+                    return false;
+
+                RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(rsaKeySize);
+                string publicKey = rsa.ToXmlString(false);
+                string message = sessionId_ + random2 + publicKey;
+                streamWriter.WriteLine(passAES.Encrypt(message)); // 3
                 streamWriter.Flush();
+
+                messageRecieved = passAES.Decrypt(streamReader.ReadLine()); //4
+                if (messageRecieved.Substring(0, SESSION_ID_LENGTH) != others_sessionID)
+                    return false;
+                string restOfMessage = messageRecieved.Substring(SESSION_ID_LENGTH);
+                byte[] AES_info = rsa.Decrypt(Convert.FromBase64String(restOfMessage), true);
+                byte[] sessionKey = new byte[aesKeySize/8];
+                byte[] sessionIV = new byte[DEFAULT_AES_BLOCK_SIZE / 8];
+                AES_info.CopyTo(sessionKey, 0);
+                AES_info.CopyTo(sessionIV, sessionKey.Length);
+                sessionAES = new SimpleAES(sessionKey, sessionIV);
+
+                //rsa.FromXmlString(streamReader.ReadLine());//<--1
+                //streamWriter.WriteLine(Convert.ToBase64String(rsa.Encrypt(sessionAES.key, true)));//<--2
+                //streamWriter.Flush();
+                //streamWriter.WriteLine(Convert.ToBase64String(rsa.Encrypt(sessionAES.IV, true)));//<--3
+                //streamWriter.Flush();
             }
+            return true;
         }
 
+
+        /// <summary>
+        /// send random number R1 recieve R1||R2 send R2
+        /// </summary>
+        /// <param name="sendFirst"></param>
+        /// <returns></returns>
         public bool handshake(bool sendFirst)
         {
             try
             {
+                string random1;
+                string random2;
+                string messageRecieved;
                 if (sendFirst)
                 {
-                    Write(MESSAGE1);
-                    if (Read() == MESSAGE2)
+                    random1 = generateRandomString(RANDOM_SIZE_BYTES);
+                    Write(random1);
+                    messageRecieved = Read();
+                    if (messageRecieved.Substring(0,RANDOM_SIZE_BASE64) == random1)
                     {
+                        random2 = messageRecieved.Substring(RANDOM_SIZE_BASE64);
+                        Write(random2);
                         return true;
                     }
-                    else
-                        return false;
+                    return false;
                 }
-                else
+                else // recieve random number R1 send R1||R2 recieve R2
                 {
-                    if (Read() == MESSAGE1)
+                    random1 = Read(); //recieve R1
+                    if (random1.Length == RANDOM_SIZE_BASE64)
                     {
-                        Write(MESSAGE2);
-                        return true;
+                        random2 = generateRandomString(RANDOM_SIZE_BYTES);
+                        Write(random1 + random2); //send R1||R2
+                        messageRecieved = Read(); //recieve R2
+                        if (messageRecieved == random2)
+                        {
+                            return true;
+                        }
                     }
-                    else
-                    {
-                        return false;
-                    }
+                    return false;
                 }
             }
             catch (Exception) { return false; }
         }
+
+        private static string generateRandomString(int size_bytes)
+        {
+            var random = new RNGCryptoServiceProvider();
+            byte[] buf = new byte[size_bytes];
+            random.GetBytes(buf);
+            return Convert.ToBase64String(buf);
+        }
+        private string generateSessionId()
+        {
+            string random = generateRandomString(RANDOM_SIZE_BYTES);
+            return isServer ? SERVER + random : CLIENT + random;
+        }
+        
 
     }
 }
