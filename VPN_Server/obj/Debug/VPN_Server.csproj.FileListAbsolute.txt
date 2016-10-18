@@ -1,1 +1,2 @@
 c:\users\cyberus\documents\visual studio 2015\Projects\VPN_Server\VPN_Server\bin\Debug\VPN_Server.exe.config
+C:\Users\lionsayshi\Desktop\UBC\year4\cpen442\VPN_Server\VPN_Server\bin\Debug\VPN_Server.exe.config

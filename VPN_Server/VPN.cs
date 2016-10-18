@@ -51,5 +51,9 @@ namespace VPN_Server
             }
             catch (Exception) { }
         }
+
+        static void main(string[] args)
+        {
+        }
     }
 }
