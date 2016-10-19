@@ -46,7 +46,6 @@
     <Compile Include="encryptedTCP.cs" />
     <Compile Include="encryptedTCP2.cs" />
     <Compile Include="encryptedTCPL.cs" />
-    <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SimpleAES.cs" />
     <Compile Include="TimeStamp.cs" />

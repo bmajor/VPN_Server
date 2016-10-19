@@ -29,13 +29,13 @@ namespace VPN_Server
         private string others_sessionID;
         private UTF8Encoding encoder = new UTF8Encoding();
         private bool isServer;
+        private SHA1CryptoServiceProvider hashProvider = new SHA1CryptoServiceProvider();
 
-        
 
 
         #region Constants
-        private const int DEFAULT_RSA_KEY_SIZE = 2048;
-        private const int DEFAULT_AES_KEY_SIZE = 256;
+        private const int DEFAULT_RSA_KEY_SIZE = 1024;//2048;
+        private const int DEFAULT_AES_KEY_SIZE = 128;
         private const int DEFAULT_AES_BLOCK_SIZE = 128;
         private const int HASH_ITERATIONS = 1009;
         private const string SALT = "~ÆL433G."; // move to main program
@@ -44,10 +44,7 @@ namespace VPN_Server
         private const int RANDOM_SIZE_BYTES = 9;
         private const int RANDOM_SIZE_BASE64 = 12;
         private readonly int SESSION_ID_LENGTH = SERVER.Length + RANDOM_SIZE_BASE64;
-
-        //remove these
-        private const string MESSAGE1 = "Confirm yes please how are you hello";//trollolol
-        private const string MESSAGE2 = "yes";
+        
         #endregion
 
         public encryptedTCP2(bool isServer, string password)
@@ -58,6 +55,7 @@ namespace VPN_Server
             var key = new Rfc2898DeriveBytes(encoder.GetBytes(password), encoder.GetBytes(SALT), HASH_ITERATIONS);
             var AESKey = key.GetBytes(DEFAULT_AES_KEY_SIZE / 8);
             var AESIV = key.GetBytes(DEFAULT_AES_BLOCK_SIZE / 8);
+            passAES = new SimpleAES(AESKey, AESIV);
         }
 
         public void Listen(int port)
@@ -160,7 +158,7 @@ namespace VPN_Server
                 streamWriter.Flush();
 
                 messageRecieved = passAES.Decrypt(streamReader.ReadLine()); //3
-                if (messageRecieved.Substring(0, SESSION_ID_LENGTH) == others_sessionID)
+                if (messageRecieved.Substring(0, SESSION_ID_LENGTH) != others_sessionID)
                     return false;
                 string receivedRandom2 = messageRecieved.Substring(SESSION_ID_LENGTH, RANDOM_SIZE_BASE64);
                 if (random2 != receivedRandom2)
@@ -172,10 +170,13 @@ namespace VPN_Server
                 sessionAES = new SimpleAES(aesKeySize);
                 byte[] toEncrypt = new byte [sessionAES.key.Length + sessionAES.IV.Length];
                 Buffer.BlockCopy(sessionAES.key, 0, toEncrypt, 0, sessionAES.key.Length);
-                Buffer.BlockCopy(sessionAES.IV, 0, toEncrypt, sessionAES.key.Length, sessionAES.key.Length);
+                Buffer.BlockCopy(sessionAES.IV, 0, toEncrypt, sessionAES.key.Length, sessionAES.IV.Length);
                 string encryptedPart = Convert.ToBase64String(rsa.Encrypt(toEncrypt, true));
                 streamWriter.WriteLine(passAES.Encrypt(sessionId_ + encryptedPart)); //4
                 streamWriter.Flush();
+
+                Console.WriteLine(Convert.ToBase64String(sessionAES.key));
+                Console.WriteLine(Convert.ToBase64String(sessionAES.IV));
 
                 //streamWriter.WriteLine(rsa.ToXmlString(false)); //<--1
                 //streamWriter.Flush();
@@ -214,15 +215,12 @@ namespace VPN_Server
                 byte[] AES_info = rsa.Decrypt(Convert.FromBase64String(restOfMessage), true);
                 byte[] sessionKey = new byte[aesKeySize/8];
                 byte[] sessionIV = new byte[DEFAULT_AES_BLOCK_SIZE / 8];
-                AES_info.CopyTo(sessionKey, 0);
-                AES_info.CopyTo(sessionIV, sessionKey.Length);
+                Buffer.BlockCopy(AES_info, 0, sessionKey, 0, sessionKey.Length);
+                Buffer.BlockCopy(AES_info, sessionKey.Length, sessionIV, 0, sessionIV.Length);
                 sessionAES = new SimpleAES(sessionKey, sessionIV);
 
-                //rsa.FromXmlString(streamReader.ReadLine());//<--1
-                //streamWriter.WriteLine(Convert.ToBase64String(rsa.Encrypt(sessionAES.key, true)));//<--2
-                //streamWriter.Flush();
-                //streamWriter.WriteLine(Convert.ToBase64String(rsa.Encrypt(sessionAES.IV, true)));//<--3
-                //streamWriter.Flush();
+                Console.WriteLine(Convert.ToBase64String(sessionAES.key));
+                Console.WriteLine(Convert.ToBase64String(sessionAES.IV));
             }
             return true;
         }
@@ -255,7 +253,7 @@ namespace VPN_Server
                 }
                 else // recieve random number R1 send R1||R2 recieve R2
                 {
-                    random1 = Read(); //recieve R1
+                    random1 = Read(); //recieve R1 //causes exception
                     if (random1.Length == RANDOM_SIZE_BASE64)
                     {
                         random2 = generateRandomString(RANDOM_SIZE_BYTES);
@@ -269,7 +267,8 @@ namespace VPN_Server
                     return false;
                 }
             }
-            catch (Exception) { return false; }
+            catch (Exception e)
+            { Console.WriteLine(e); return false; }
         }
 
         private static string generateRandomString(int size_bytes)
@@ -284,7 +283,11 @@ namespace VPN_Server
             string random = generateRandomString(RANDOM_SIZE_BYTES);
             return isServer ? SERVER + random : CLIENT + random;
         }
-        
+
+        private byte[] HashMessage(string Message)
+        {
+            return hashProvider.ComputeHash(encoder.GetBytes(Message));
+        }
 
     }
 }

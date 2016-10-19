@@ -52,8 +52,57 @@ namespace VPN_Server
             catch (Exception) { }
         }
 
-        static void main(string[] args)
+        private void start()
         {
+            Console.WriteLine("Enter Password:");
+            string password = Console.ReadLine();
+
+            string s;
+            Console.WriteLine("Use default IP and port of " + DEFAULT_IP + ":" + DEFAULT_PORT + " (y/n):");
+            char c = Console.ReadKey().KeyChar;
+            if (c == 'y' || c == 'Y') // use default IP and port
+            {
+                this.IP = DEFAULT_IP;
+                port = DEFAULT_PORT;
+            }
+            else
+            {
+                Console.WriteLine("Enter IP (XXX.XXX.XXX.XXX)");
+
+            }
+            do
+            {
+                Console.WriteLine("Client or Server (c/s):");
+                s = Console.ReadLine();
+                s = s.ToLower();
+            } while (s != "c" && s != "s");
+            encryptedTCP2 crypt = new encryptedTCP2(s == "s", password);
+            if (s == "s")
+                crypt.Listen(port);
+            else
+                crypt.Connect(System.Net.IPAddress.Parse(IP), port);
+            if (crypt.SetupEncryption())
+            {
+                Console.WriteLine("Connected and Encrypted");
+            }
+            Console.WriteLine("failed");
+            Console.ReadLine();
         }
+
+        public void testing()
+        {
+            string password = "hello";
+            encryptedTCP2 client = new encryptedTCP2(false, password);
+            encryptedTCP2 server = new encryptedTCP2(true, password);
+            server.Listen(DEFAULT_PORT);
+        }
+
+        static void Main(string[] args)
+        {
+            VPN vpn = new VPN();
+            vpn.start();
+        }
+
+        
     }
 }
