@@ -4,46 +4,50 @@ using System.Linq;
 using System.Text;
 using System.Security.Cryptography;
 using System.IO;
+using MyFuctions;
 
 namespace sAES 
 {
     public class SimpleAES
     {
-        private ICryptoTransform encryptor, decryptor;
         private UTF8Encoding encoder;
-        public byte[] key;
-        public byte[] IV;
+        RijndaelManaged rm;
+        public bool verbose = true;
+        public byte[] key
+        {
+            get { return rm.Key; }
+        }
+        public byte[] IV
+        {
+            get { return rm.IV; }
+            set { rm.IV = value; }
+        }
+        public int BlockSizeBytes
+        {
+            get { return rm.BlockSize / 8; }
+        }
+        
 
         public SimpleAES()
         {
-            RijndaelManaged rm = new RijndaelManaged(); // default to mode CBC
+            rm = new RijndaelManaged(); // default to mode CBC
+            rm.Mode = CipherMode.CBC;
             rm.GenerateKey();
-            rm.GenerateIV();
-            key = rm.Key;
-            IV = rm.IV;
-            encryptor = rm.CreateEncryptor(key, IV);
-            decryptor = rm.CreateDecryptor(key, IV);
             encoder = new UTF8Encoding();
         }
         public SimpleAES(int keySize)
         {
-            RijndaelManaged rm = new RijndaelManaged();
+            rm = new RijndaelManaged();
+            rm.Mode = CipherMode.CBC;
             rm.KeySize = keySize;
             rm.GenerateKey();
-            rm.GenerateIV();
-            key = rm.Key;
-            IV = rm.IV;
-            encryptor = rm.CreateEncryptor(key, IV);
-            decryptor = rm.CreateDecryptor(key, IV);
             encoder = new UTF8Encoding();
         }
-        public SimpleAES(byte[] key1, byte[] IV1)
+        public SimpleAES(byte[] key1)
         {
-            RijndaelManaged rm = new RijndaelManaged();
-            key = key1;
-            IV = IV1;
-            encryptor = rm.CreateEncryptor(key1, IV1);
-            decryptor = rm.CreateDecryptor(key1, IV1);
+            rm = new RijndaelManaged();
+            rm.Mode = CipherMode.CBC;
+            rm.Key = key1;
             encoder = new UTF8Encoding();
         }
 
@@ -59,12 +63,27 @@ namespace sAES
 
         public byte[] Encrypt(byte[] buf)
         {
-            return Transform(buf, encryptor);
+            rm.GenerateIV();
+            if (verbose)
+                Console.WriteLine("Encrypt: IV=" + Convert.ToBase64String(IV));
+            var encryptor = rm.CreateEncryptor();
+            var encrypted = Transform(buf, encryptor);
+            return Help.combine(IV, encrypted);
         }
 
         public byte[] Decrypt(byte[] buf)
         {
-            return Transform(buf, decryptor);
+            byte[] temp = new byte[BlockSizeBytes];
+            Buffer.BlockCopy(buf, 0, temp, 0, BlockSizeBytes); //read in IV
+            IV = temp;
+            if (verbose)
+            {
+                Console.WriteLine("Decrypt: IV=" + Convert.ToBase64String(IV));
+            }
+            var message = new byte[buf.Length - BlockSizeBytes];
+            Buffer.BlockCopy(buf, IV.Length, message, 0, message.Length);
+            var decryptor = rm.CreateDecryptor();
+            return Transform(message, decryptor);
         }
 
         protected byte[] Transform(byte[] buffer, ICryptoTransform transform)
@@ -76,5 +95,6 @@ namespace sAES
             }
             return ms.ToArray();
         }
+
     }
 }

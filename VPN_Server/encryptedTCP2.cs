@@ -20,7 +20,6 @@ namespace VPN_Server
         private StreamReader streamReader;
         private StreamWriter streamWriter;
         private Stream networkStream;
-        //private RSACryptoServiceProvider rsa;
         private SimpleAES sessionAES;
         private SimpleAES passAES;
         private int rsaKeySize;
@@ -29,13 +28,16 @@ namespace VPN_Server
         private string others_sessionID;
         private UTF8Encoding encoder = new UTF8Encoding();
         private bool isServer;
-        private SHA1CryptoServiceProvider hashProvider = new SHA1CryptoServiceProvider();
+        
+        private bool verbose = true;
+        private ulong messageCount = 0;
+        private ulong othersMessageCount = 0;
 
 
 
         #region Constants
-        private const int DEFAULT_RSA_KEY_SIZE = 1024;//2048;
-        private const int DEFAULT_AES_KEY_SIZE = 128;
+        private const int DEFAULT_RSA_KEY_SIZE = 2048;//2048;
+        private const int DEFAULT_AES_KEY_SIZE = 256;
         private const int DEFAULT_AES_BLOCK_SIZE = 128;
         private const int HASH_ITERATIONS = 1009;
         private const string SALT = "~ÆL433G."; // move to main program
@@ -54,8 +56,7 @@ namespace VPN_Server
             rsaKeySize = DEFAULT_RSA_KEY_SIZE;
             var key = new Rfc2898DeriveBytes(encoder.GetBytes(password), encoder.GetBytes(SALT), HASH_ITERATIONS);
             var AESKey = key.GetBytes(DEFAULT_AES_KEY_SIZE / 8);
-            var AESIV = key.GetBytes(DEFAULT_AES_BLOCK_SIZE / 8);
-            passAES = new SimpleAES(AESKey, AESIV);
+            passAES = new SimpleAES(AESKey);
         }
 
         public void Listen(int port)
@@ -93,9 +94,10 @@ namespace VPN_Server
         /// Read and decrypts a string from the NetworkStream.
         /// </summary>
         /// <returns>The dycrypted string.</returns>
-        public string Read()
+        public Message Read()
         {
-            return sessionAES.Decrypt(streamReader.ReadLine());
+            var unparsed = sessionAES.Decrypt(streamReader.ReadLine());
+            return new Message(unparsed, othersMessageCount++, isServer);
         }
         /// <summary>
         /// Encrypts and writes a string to the NetworkStream.
@@ -103,7 +105,8 @@ namespace VPN_Server
         /// <param name="str">The string to encrypt and send</param>
         public void Write(string str)
         {
-            streamWriter.WriteLine(sessionAES.Encrypt(str));
+            var m = Message.FormMessage(++messageCount, str, isServer);
+            streamWriter.WriteLine(sessionAES.Encrypt(m));
             streamWriter.Flush();
         }
         #endregion
@@ -166,23 +169,16 @@ namespace VPN_Server
                 string rsaPublic = messageRecieved.Substring(SESSION_ID_LENGTH + RANDOM_SIZE_BASE64);
                 RSACryptoServiceProvider rsa = new RSACryptoServiceProvider();
                 rsa.FromXmlString(rsaPublic);
+                if (verbose)
+                    Console.WriteLine("RSA Public Key: " + rsaPublic + "\n");
 
                 sessionAES = new SimpleAES(aesKeySize);
-                byte[] toEncrypt = new byte [sessionAES.key.Length + sessionAES.IV.Length];
-                Buffer.BlockCopy(sessionAES.key, 0, toEncrypt, 0, sessionAES.key.Length);
-                Buffer.BlockCopy(sessionAES.IV, 0, toEncrypt, sessionAES.key.Length, sessionAES.IV.Length);
-                string encryptedPart = Convert.ToBase64String(rsa.Encrypt(toEncrypt, true));
+                string encryptedPart = Convert.ToBase64String(rsa.Encrypt(sessionAES.key, true));
                 streamWriter.WriteLine(passAES.Encrypt(sessionId_ + encryptedPart)); //4
                 streamWriter.Flush();
 
-                Console.WriteLine(Convert.ToBase64String(sessionAES.key));
-                Console.WriteLine(Convert.ToBase64String(sessionAES.IV));
-
-                //streamWriter.WriteLine(rsa.ToXmlString(false)); //<--1
-                //streamWriter.Flush();
-                //byte[] key = rsa.Decrypt(Convert.FromBase64String(streamReader.ReadLine()), true);//<--2
-                //byte[] IV = rsa.Decrypt(Convert.FromBase64String(streamReader.ReadLine()), true);//<--3
-                //sessionAES = new SimpleAES(key, IV);
+                if (verbose)
+                    Console.WriteLine("SessionKey: " + Convert.ToBase64String(sessionAES.key));
 
             }
             else ///client
@@ -204,6 +200,8 @@ namespace VPN_Server
 
                 RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(rsaKeySize);
                 string publicKey = rsa.ToXmlString(false);
+                if (verbose)
+                    Console.WriteLine("RSA Public Key: " + publicKey + "\n");
                 string message = sessionId_ + random2 + publicKey;
                 streamWriter.WriteLine(passAES.Encrypt(message)); // 3
                 streamWriter.Flush();
@@ -212,15 +210,11 @@ namespace VPN_Server
                 if (messageRecieved.Substring(0, SESSION_ID_LENGTH) != others_sessionID)
                     return false;
                 string restOfMessage = messageRecieved.Substring(SESSION_ID_LENGTH);
-                byte[] AES_info = rsa.Decrypt(Convert.FromBase64String(restOfMessage), true);
-                byte[] sessionKey = new byte[aesKeySize/8];
-                byte[] sessionIV = new byte[DEFAULT_AES_BLOCK_SIZE / 8];
-                Buffer.BlockCopy(AES_info, 0, sessionKey, 0, sessionKey.Length);
-                Buffer.BlockCopy(AES_info, sessionKey.Length, sessionIV, 0, sessionIV.Length);
-                sessionAES = new SimpleAES(sessionKey, sessionIV);
+                byte[] sessionKey = rsa.Decrypt(Convert.FromBase64String(restOfMessage), true);
+                sessionAES = new SimpleAES(sessionKey);
 
-                Console.WriteLine(Convert.ToBase64String(sessionAES.key));
-                Console.WriteLine(Convert.ToBase64String(sessionAES.IV));
+                if(verbose)
+                    Console.WriteLine("SessionKey: " + Convert.ToBase64String(sessionAES.key));
             }
             return true;
         }
@@ -229,7 +223,7 @@ namespace VPN_Server
         /// <summary>
         /// send random number R1 recieve R1||R2 send R2
         /// </summary>
-        /// <param name="sendFirst"></param>
+        /// <param name="sendFirst">Bool to determin if you will send first or recieve first</param>
         /// <returns></returns>
         public bool handshake(bool sendFirst)
         {
@@ -237,35 +231,38 @@ namespace VPN_Server
             {
                 string random1;
                 string random2;
-                string messageRecieved;
+                Message messageRecieved;
                 if (sendFirst)
                 {
                     random1 = generateRandomString(RANDOM_SIZE_BYTES);
                     Write(random1);
                     messageRecieved = Read();
-                    if (messageRecieved.Substring(0,RANDOM_SIZE_BASE64) == random1)
+                    if (messageRecieved.isSecure == true && messageRecieved.Text.Substring(0,RANDOM_SIZE_BASE64) == random1)
                     {
-                        random2 = messageRecieved.Substring(RANDOM_SIZE_BASE64);
+                        random2 = messageRecieved.Text.Substring(RANDOM_SIZE_BASE64);
                         Write(random2);
                         return true;
                     }
-                    return false;
                 }
                 else // recieve random number R1 send R1||R2 recieve R2
                 {
-                    random1 = Read(); //recieve R1 //causes exception
-                    if (random1.Length == RANDOM_SIZE_BASE64)
+                    messageRecieved = Read();
+                    random1 = messageRecieved.Text;
+                    if (messageRecieved.isSecure && random1.Length == RANDOM_SIZE_BASE64)
                     {
                         random2 = generateRandomString(RANDOM_SIZE_BYTES);
                         Write(random1 + random2); //send R1||R2
                         messageRecieved = Read(); //recieve R2
-                        if (messageRecieved == random2)
+                        if (messageRecieved.isSecure && messageRecieved.Text == random2)
                         {
                             return true;
                         }
                     }
-                    return false;
                 }
+                if (verbose)
+                    Console.WriteLine("Handshake Failed: " + messageRecieved.Error);
+
+                return false;
             }
             catch (Exception e)
             { Console.WriteLine(e); return false; }
@@ -283,11 +280,84 @@ namespace VPN_Server
             string random = generateRandomString(RANDOM_SIZE_BYTES);
             return isServer ? SERVER + random : CLIENT + random;
         }
+    }
 
-        private byte[] HashMessage(string Message)
+    class Message
+    {
+        public ulong Count = 0;
+        public string Text = "";
+        public string Hash = "";
+        public bool isSecure = false;
+        public string Error = "";
+
+        private const int COUNTER_LENGTH = 12; //string
+        private const int HASH_LENGTH_64 = 28;
+        private const string SERVER_ID = "server";
+        private const string CLIENT_ID = "client";
+        private const int ID_LENGTH = 6;
+
+        public Message(string errorMessage)
         {
-            return hashProvider.ComputeHash(encoder.GetBytes(Message));
+            Error = errorMessage;
         }
 
+        public Message(string unparsed, ulong currentCount, bool fromClient)
+        {
+            if(unparsed.Length < COUNTER_LENGTH + HASH_LENGTH_64 + ID_LENGTH)
+            {
+                Error = "Message too small";
+                return;
+            }
+            Hash = unparsed.Substring(0, HASH_LENGTH_64);
+            var toHash = unparsed.Substring(HASH_LENGTH_64);
+            var ID = toHash.Substring(0, ID_LENGTH);
+            var textCount = toHash.Substring(ID_LENGTH, COUNTER_LENGTH);
+            Count = BitConverter.ToUInt64(Convert.FromBase64String(textCount), 0);
+            Text = toHash.Substring(ID_LENGTH + COUNTER_LENGTH);
+            string computedHash = HashMessage(toHash);
+            if (Hash != HashMessage(toHash))
+            {
+                Error = "Hash does not match: Computed Hash:" + computedHash + " Recieved Hash:" + Hash;
+                return;
+            }
+            else if (Count <= currentCount)
+            {
+                Error = "MessageCount Error: Possible Replay Attack";
+                return;
+            }
+            else if  (ID != SERVER_ID && ID != CLIENT_ID)
+            {
+                Error = "Unrecognized ID: " + ID;
+                return;
+            }
+            else if ((ID == CLIENT_ID && !fromClient) || (ID == SERVER_ID && fromClient))
+            {
+                Error = "Incorrect ID used : Possible Replay Attack";
+                return;
+            }
+            else
+            {
+                isSecure = true;
+            }
+        }
+
+        // format: 27 char: hash, 6 char: ID, 12 char: count, rest for message;
+        public static string FormMessage(ulong messageNumber, string text, bool isServer)
+        {
+            
+            var toHash = (isServer ? SERVER_ID : CLIENT_ID)
+                + Convert.ToBase64String(BitConverter.GetBytes(messageNumber))
+                + text;
+            return HashMessage(toHash) + toHash;
+
+        }
+
+        public static string HashMessage(string Message)
+        {
+            UTF8Encoding encoder = new UTF8Encoding();
+            SHA1CryptoServiceProvider hashProvider = new SHA1CryptoServiceProvider();
+            return Convert.ToBase64String(hashProvider.ComputeHash(encoder.GetBytes(Message)));
+        }
     }
+
 }
