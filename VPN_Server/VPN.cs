@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VPN_Server
@@ -11,7 +12,8 @@ namespace VPN_Server
         private string IP;
         private int port;									//Port to connect to
         private int readTimeout;                            //read timeout for the readStream
-
+        private Thread readThread;
+        encryptedTCP2 cryptTCP;
 
         private const int DEFAULT_PORT = 10245;				//Default port to listen on if one isn't declared
         private const string DEFAULT_IP = "127.0.0.1";
@@ -20,6 +22,7 @@ namespace VPN_Server
         private const int RECONNECT_TIME = 7000;            //7 seconds
         private const string SALT = "~Æ";                  //string to salt the sha hashes with
         private const int RSA_KEY_SIZE = 2048;
+        
 
         public void startServer()
         {
@@ -40,7 +43,7 @@ namespace VPN_Server
             {
                 Console.WriteLine("Dropping Connection");
                 Console.ResetColor();
-                //cryptListener.dropConnection();
+                //cryptTCP.dropConnection();
                 return;
             }
             catch (Exception) { }
@@ -70,12 +73,12 @@ namespace VPN_Server
                 s = Console.ReadLine();
                 s = s.ToLower();
             } while (s != "c" && s != "s");
-            encryptedTCP2 crypt = new encryptedTCP2(s == "s", password);
+            cryptTCP = new encryptedTCP2(s == "s", password);
             if (s == "s")
-                crypt.Listen(port);
+                cryptTCP.Listen(port);
             else
-                crypt.Connect(System.Net.IPAddress.Parse(IP), port);
-            if (crypt.SetupEncryption())
+                cryptTCP.Connect(System.Net.IPAddress.Parse(IP), port);
+            if (cryptTCP.SetupEncryption())
             {
                 Console.WriteLine("Connected and Encrypted");
             }
@@ -83,14 +86,30 @@ namespace VPN_Server
             Console.ReadLine();
         }
 
-        public void testing()
+        private void recieve()
         {
-            string password = "hello";
-            encryptedTCP2 client = new encryptedTCP2(false, password);
-            encryptedTCP2 server = new encryptedTCP2(true, password);
-            server.Listen(DEFAULT_PORT);
+            try
+            {
+                while (true)
+                {
+                    Message m = cryptTCP.Read();
+                    if (m.isSecure)
+                    {
+                        Console.WriteLine("Recieved Secure Message: " + m.Text);
+                    }
+                    else
+                    {
+                        Console.WriteLine("INSECURE MESSAGE. ERROR: " + m.Error);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                dropConnection();
+            }
         }
 
+        
         static void Main(string[] args)
         {
             VPN vpn = new VPN();
