@@ -25,7 +25,6 @@ namespace TCPcrypt
         private int rsaKeySize;
         private int aesKeySize;
         private string sessionId_;
-        private string others_sessionID;
         private UTF8Encoding encoder = new UTF8Encoding();
         private bool isServer;
         private bool verbose;
@@ -42,7 +41,7 @@ namespace TCPcrypt
         private const string CLIENT = "client";
         private const int RANDOM_SIZE_BYTES = 9;
         private const int RANDOM_SIZE_BASE64 = 12;
-        private readonly int SESSION_ID_LENGTH = SERVER.Length + RANDOM_SIZE_BASE64;
+        private readonly int SESSION_ID_LENGTH = SERVER.Length;
         
         #endregion
 
@@ -126,7 +125,6 @@ namespace TCPcrypt
         {
             try
             {
-                sessionId_ = generateSessionId();
                 if (exchangeKeys())
                 {
                     //handshake
@@ -145,24 +143,28 @@ namespace TCPcrypt
 
         /// <summary>
         /// Client: 
-        /// 1) send: ID_client||R1
-        /// 2) recieve R2 || E(ID_server || R1, K_pass)
+        /// 1) send: "client"||R1
+        /// 2) recieve R2 || HE("server" || R1, K_pass)
         ///     2.1 check R1
         ///     2.2 check ID_server for "server" and size
-        /// 3) send E(ID_client || R2 || RSA_public, k_pass)
-        /// 4) recieve E(ID_server || E(Key_session || IV_session, RSA_public), k_pass)
+        /// 3) send HE("client" || R2 || RSA_public, k_pass)
+        /// 4) recieve HE("server" || E(Key_session || IV_session, RSA_public), k_pass)
+        /// 
+        /// HE(x||y, k) --> E(H(x||y)||x||y, k)
+        /// 
         /// </summary>
         /// <returns>true if key exchange is succssesful</returns>
         public bool exchangeKeys()
         {
+            sessionId_ = isServer ? SERVER : CLIENT;
             if (isServer)
             {
                 string messageRecieved = streamReader.ReadLine(); //1
-                others_sessionID = messageRecieved.Substring(0, SESSION_ID_LENGTH);
+                var others_sessionID = messageRecieved.Substring(0, SESSION_ID_LENGTH);
                 string random1 = messageRecieved.Substring(SESSION_ID_LENGTH);
                 if (random1.Length != RANDOM_SIZE_BASE64)
                     return false;
-                if (others_sessionID.Substring(0, CLIENT.Length) != CLIENT)
+                if (others_sessionID != CLIENT)
                     return false;
 
                 string random2 = generateRandomString(RANDOM_SIZE_BYTES);
@@ -210,8 +212,8 @@ namespace TCPcrypt
                 messageRecieved = hashedMessage.Message;
                 if (!hashedMessage.hashMatched)
                     return false;
-                others_sessionID = messageRecieved.Substring(0, SESSION_ID_LENGTH);
-                if (others_sessionID.Substring(0, SERVER.Length) != SERVER) //2.2
+                var others_sessionID = messageRecieved.Substring(0, SESSION_ID_LENGTH);
+                if (others_sessionID != SERVER) //2.2
                     return false;
                 string recievedRandom1 = messageRecieved.Substring(SESSION_ID_LENGTH);
                 if (recievedRandom1 != random1) // 2.1
@@ -328,12 +330,6 @@ namespace TCPcrypt
             byte[] buf = new byte[size_bytes];
             random.GetBytes(buf);
             return Convert.ToBase64String(buf);
-        }
-
-        private string generateSessionId()
-        {
-            string random = generateRandomString(RANDOM_SIZE_BYTES);
-            return isServer ? SERVER + random : CLIENT + random;
         }
     }
 

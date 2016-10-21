@@ -162,6 +162,7 @@ namespace VPN_Server
                 Console.WriteLine("failed");
             }
             dropConnection();
+            Console.ReadKey();
         }
 
         private void send()
