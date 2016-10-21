@@ -59,7 +59,7 @@ namespace TCPcrypt
             passAES.verbose = verbose;
         }
 
-        #region Listen/Connect
+        #region Listen/Connect/Drop
         public void Listen(int port)
         {
             port_ = port;
@@ -89,6 +89,39 @@ namespace TCPcrypt
                 return false;
             }
         }
+
+        /// <summary>
+        /// Drops the connection and disposes the streams.
+        /// </summary>
+        public void dropConnection()
+        {
+            try
+            {
+                streamReader.Dispose();
+            }
+            catch (Exception) { }
+            try
+            {
+                streamWriter.Dispose();
+            }
+            catch (Exception) { }
+            try
+            {
+                networkStream.Dispose();
+            }
+            catch (Exception) { }
+            try
+            {
+                sock.Close();
+            }
+            catch (Exception) { }
+            try
+            {
+                listener.Stop();
+            }
+            catch (Exception) { }
+        }
+
         #endregion
 
         #region Read/Write
@@ -292,38 +325,7 @@ namespace TCPcrypt
         }
         #endregion
 
-        /// <summary>
-        /// Drops the connection and disposes the streams.
-        /// </summary>
-        public void dropConnection()
-        {
-            try
-            {
-                streamReader.Dispose();
-            }
-            catch (Exception) { }
-            try
-            {
-                streamWriter.Dispose();
-            }
-            catch (Exception) { }
-            try
-            {
-                networkStream.Dispose();
-            }
-            catch (Exception) { }
-            try
-            {
-                sock.Close();
-            }
-            catch (Exception) { }
-            try
-            {
-                listener.Stop();
-            }
-            catch (Exception) { }
-        }
-
+        #region Helpers
         private static string generateRandomString(int size_bytes)
         {
             var random = new RNGCryptoServiceProvider();
@@ -331,6 +333,7 @@ namespace TCPcrypt
             random.GetBytes(buf);
             return Convert.ToBase64String(buf);
         }
+        #endregion
     }
 
 }
