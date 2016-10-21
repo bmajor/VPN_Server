@@ -4,15 +4,16 @@ using System.Linq;
 using System.Text;
 using System.Security.Cryptography;
 using System.IO;
-using MyFuctions;
 
 namespace sAES 
 {
     public class SimpleAES
     {
+        #region Variables
         private UTF8Encoding encoder;
         RijndaelManaged rm;
-        public bool verbose = true;
+        public bool verbose = false;
+
         public byte[] key
         {
             get { return rm.Key; }
@@ -26,8 +27,9 @@ namespace sAES
         {
             get { return rm.BlockSize / 8; }
         }
-        
+        #endregion
 
+        #region Constructors
         public SimpleAES()
         {
             rm = new RijndaelManaged(); // default to mode CBC
@@ -50,7 +52,9 @@ namespace sAES
             rm.Key = key1;
             encoder = new UTF8Encoding();
         }
+        #endregion
 
+        #region String Encrypt/Decrypt
         public string Encrypt(string unencrypted)
         {
             return Convert.ToBase64String(Encrypt(encoder.GetBytes(unencrypted)));
@@ -60,7 +64,9 @@ namespace sAES
         {
             return encoder.GetString(Decrypt(Convert.FromBase64String(encrypted)));
         }
+        #endregion
 
+        #region Byte[] Encrypte/Decrypt
         public byte[] Encrypt(byte[] buf)
         {
             rm.GenerateIV();
@@ -68,7 +74,7 @@ namespace sAES
                 Console.WriteLine("Encrypt: IV=" + Convert.ToBase64String(IV));
             var encryptor = rm.CreateEncryptor();
             var encrypted = Transform(buf, encryptor);
-            return Help.combine(IV, encrypted);
+            return combine(IV, encrypted);
         }
 
         public byte[] Decrypt(byte[] buf)
@@ -85,7 +91,9 @@ namespace sAES
             var decryptor = rm.CreateDecryptor();
             return Transform(message, decryptor);
         }
+        #endregion
 
+        #region Help
         protected byte[] Transform(byte[] buffer, ICryptoTransform transform)
         {
             MemoryStream ms = new MemoryStream();
@@ -95,6 +103,14 @@ namespace sAES
             }
             return ms.ToArray();
         }
-
+        
+        private static byte[] combine(byte[] buf1, byte[] buf2)
+        {
+            byte[] combined = new byte[buf1.Length + buf2.Length];
+            Buffer.BlockCopy(buf1, 0, combined, 0, buf1.Length);
+            Buffer.BlockCopy(buf2, 0, combined, buf1.Length, buf2.Length);
+            return combined;
+        }
+        #endregion 
     }
 }

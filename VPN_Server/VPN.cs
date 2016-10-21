@@ -1,62 +1,101 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
+using TCPcrypt;
 
 namespace VPN_Server
 {
     class VPN
     {
+        #region variables
         private string IP;
-        private int port;									//Port to connect to
-        private int readTimeout;                            //read timeout for the readStream
+        private int port;
+        private bool verbose;
+        private bool isServer;
+        private string password;
         private Thread readThread;
         encryptedTCP2 cryptTCP;
+        #endregion
 
+        #region Constants
         private const int DEFAULT_PORT = 10245;				//Default port to listen on if one isn't declared
         private const string DEFAULT_IP = "127.0.0.1";
-        private const int PASSWORD_TIMEOUT = 22000;         //22 second
-        private const int NORMAL_TIMEOUT = 1200000;         //20 minutes
-        private const int RECONNECT_TIME = 7000;            //7 seconds
-        private const string SALT = "~Æ";                  //string to salt the sha hashes with
-        private const int RSA_KEY_SIZE = 2048;
+        private const string SALT = "~ÆL4|3G.";
+        #endregion
+
+        #region Constructors
+        public VPN()
+        {
+            getSettings();
+        }
         
-
-        public void startServer()
+        public VPN(string[] args)
         {
-            try
+            if (args.Length == 0)
             {
-                Console.WriteLine("Listening on port " + port);
+                getSettings();
             }
-            catch (Exception)
+            else
             {
-                //Console.WriteLine(ex);
-                dropConnection();
+                verbose = false;
+                IP = DEFAULT_IP;
+                port = DEFAULT_PORT;
+                string[] formatedArgs = new string[args.Length];
+                int i = 0;
+                foreach (string s in args)
+                {
+                    formatedArgs[i] = s.Trim().ToLower();
+                    i++;
+                }
+                bool isGood = false;
+                foreach (string s in args)
+                {
+                    if (s == "-v")
+                    {
+                        verbose = true;
+                    }
+                    i++;
+                }
+                foreach (string s in args)
+                {
+                    if (s == "-s" || s == "-c")
+                    {
+                        isServer = s == "-s";
+                        isGood = true;
+                    }
+                }
+                if (isGood)
+                {
+                    getPassword();
+                }
+                else
+                {
+                    Console.WriteLine("Must enter -s or -c");
+                }
             }
         }
+        #endregion
 
-        private void dropConnection()
-        {
-            try
-            {
-                Console.WriteLine("Dropping Connection");
-                Console.ResetColor();
-                //cryptTCP.dropConnection();
-                return;
-            }
-            catch (Exception) { }
-        }
-
-        private void start()
+        #region Settings
+        private void getPassword()
         {
             Console.WriteLine("Enter Password:");
-            string password = Console.ReadLine();
+            password = Console.ReadLine();
+        }
 
+        private void getSettings()
+        {
+            verbose = false;
+            getPassword();
             string s;
-            Console.WriteLine("Use default IP and port of " + DEFAULT_IP + ":" + DEFAULT_PORT + " (y/n):");
+            Console.WriteLine();
+            Console.WriteLine("Verbose? (y/n):");
             char c = Console.ReadKey().KeyChar;
+            if (c == 'y' || c == 'Y') // use default IP and port
+            {
+                verbose = true;
+            }
+            Console.WriteLine("\nUse default IP and port of " + DEFAULT_IP + ":" + DEFAULT_PORT + " (y/n):");
+            c = Console.ReadKey().KeyChar;
             if (c == 'y' || c == 'Y') // use default IP and port
             {
                 this.IP = DEFAULT_IP;
@@ -64,26 +103,75 @@ namespace VPN_Server
             }
             else
             {
-                Console.WriteLine("Enter IP (XXX.XXX.XXX.XXX)");
+                bool parsed = false;
+                var _ip = System.Net.IPAddress.Parse(DEFAULT_IP);
+                do
+                {
+                    Console.WriteLine("Enter IP (XXX.XXX.XXX.XXX)");
+                    parsed = System.Net.IPAddress.TryParse(Console.ReadLine().Trim(), out _ip);
+                } while (!parsed);
+                this.IP = _ip.ToString();
+                do
+                {
+                    Console.WriteLine("Enter Port:");
+                    parsed = Int32.TryParse(Console.ReadLine().Trim(), out this.port);
+                } while (!parsed);
 
             }
             do
             {
-                Console.WriteLine("Client or Server (c/s):");
+                Console.WriteLine("\nClient or Server (c/s):");
                 s = Console.ReadLine();
                 s = s.ToLower();
             } while (s != "c" && s != "s");
-            cryptTCP = new encryptedTCP2(s == "s", password);
-            if (s == "s")
+            isServer = s == "s";
+
+        }
+        #endregion
+
+        private void dropConnection()
+        {
+            try
+            {
+                Console.WriteLine("Dropping Connection");
+                Console.ResetColor();
+                cryptTCP.dropConnection();
+                return;
+            }
+            catch (Exception) { }
+        }
+
+        public void start()
+        {
+            cryptTCP = new encryptedTCP2(isServer, password, SALT, verbose);
+            if (isServer)
                 cryptTCP.Listen(port);
             else
                 cryptTCP.Connect(System.Net.IPAddress.Parse(IP), port);
+
             if (cryptTCP.SetupEncryption())
             {
                 Console.WriteLine("Connected and Encrypted");
+
+                readThread = new Thread(new ThreadStart(recieve));
+                readThread.Start();
+                send();
             }
-            Console.WriteLine("failed");
-            Console.ReadLine();
+            else
+            {
+                Console.WriteLine("failed");
+            }
+            dropConnection();
+        }
+
+        private void send()
+        {
+            while (true)
+            {
+                string toWrite = Console.ReadLine().Trim();
+                if (toWrite != "")
+                    cryptTCP.Write(toWrite);
+            }
         }
 
         private void recieve()
@@ -92,10 +180,10 @@ namespace VPN_Server
             {
                 while (true)
                 {
-                    Message m = cryptTCP.Read();
+                    SecureMessage m = cryptTCP.Read();
                     if (m.isSecure)
                     {
-                        Console.WriteLine("Recieved Secure Message: " + m.Text);
+                        Console.WriteLine("Recieved Secure Message: " + m.Message);
                     }
                     else
                     {
@@ -108,11 +196,10 @@ namespace VPN_Server
                 dropConnection();
             }
         }
-
         
         static void Main(string[] args)
         {
-            VPN vpn = new VPN();
+            VPN vpn = new VPN(args);
             vpn.start();
         }
 

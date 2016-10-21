@@ -44,10 +44,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="encryptedTCP2.cs" />
-    <Compile Include="Help.cs" />
+    <Compile Include="HashedMessage.cs" />
+    <Compile Include="SecureMessage.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SimpleAES.cs" />
-    <Compile Include="TimeStamp.cs" />
     <Compile Include="VPN.cs" />
   </ItemGroup>
   <ItemGroup>
