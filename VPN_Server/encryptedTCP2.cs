@@ -139,7 +139,14 @@ namespace TCPcrypt
             } catch (Exception) {
                 return new SecureMessage("Decript Exception Thrown.");
             }
-            return new SecureMessage(unparsed, othersMessageCount++, isServer);
+            var sm = new SecureMessage(unparsed, othersMessageCount, isServer);
+            if (sm.isSecure == true)
+            {
+                if (verbose && sm.Count - othersMessageCount > 1)
+                    Console.WriteLine("Missing " + (sm.Count - othersMessageCount).ToString() + "Messages");
+                othersMessageCount = sm.Count;
+            }
+            return sm;
         }
         /// <summary>
         /// Encrypts and writes a string to the NetworkStream.
