@@ -134,7 +134,6 @@ namespace VPN_Server
             try
             {
                 Console.WriteLine("Dropping Connection");
-                Console.ResetColor();
                 cryptTCP.dropConnection();
                 return;
             }
